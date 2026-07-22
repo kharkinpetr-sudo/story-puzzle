@@ -145,8 +145,12 @@
     const checks = [];
     for (let n = 1; n <= 50; n++) {
       const dir = `${bookFolder}level${n}/`;
-      checks.push(fileExists(dir + '0_0.jpg').then(() => dir));
-      checks.push(fileExists(dir + '0_0.png').then(() => dir));
+      checks.push(
+        Promise.all([
+          fileExists(dir + '0_0.jpg'),
+          fileExists(dir + '0_0.png')
+        ]).then(([hasJpg, hasPng]) => (hasJpg || hasPng) ? dir : null)
+      );
     }
     const results = await Promise.all(checks);
     return results.filter(Boolean);
