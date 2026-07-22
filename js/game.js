@@ -50,24 +50,39 @@
   }
 
   async function detectGrid(folder, ext) {
-    let maxCol = 0;
-    let maxRow = 0;
-    let count = 0;
-    for (let row = 0; row < 50; row++) {
-      let foundInRow = false;
-      for (let col = 0; col < 50; col++) {
-        if (await fileExists(`${folder}${col}_${row}.${ext}`)) {
-          if (col > maxCol) maxCol = col;
-          if (row > maxRow) maxRow = row;
-          count++;
-          foundInRow = true;
-        } else {
-          if (foundInRow) break;
-        }
+    const MAX_ROWS = 8, MAX_COLS = 8;
+    const checks = [];
+    for (let row = 0; row < MAX_ROWS; row++) {
+      for (let col = 0; col < MAX_COLS; col++) {
+        checks.push(fileExists(`${folder}${col}_${row}.${ext}`).then(exists => ({row, col, exists})));
       }
-      if (!foundInRow && row > 0) break;
+    }
+    const results = await Promise.all(checks);
+    const map = new Map();
+    let count = 0, maxCol = 0, maxRow = 0;
+    for (const {row, col, exists} of results) {
+      map.set(`${row}_${col}`, exists);
+      if (exists) {
+        if (col > maxCol) maxCol = col;
+        if (row > maxRow) maxRow = row;
+        count++;
+      }
     }
     if (count === 0) return null;
+    for (let row = 0; row <= maxRow; row++) {
+      let found = false;
+      for (let col = 0; col <= maxCol; col++) {
+        if (map.get(`${row}_${col}`)) { found = true; break; }
+      }
+      if (!found && row > 0) return null;
+    }
+    for (let col = 0; col <= maxCol; col++) {
+      let found = false;
+      for (let row = 0; row <= maxRow; row++) {
+        if (map.get(`${row}_${col}`)) { found = true; break; }
+      }
+      if (!found && col > 0) return null;
+    }
     const cols = maxCol + 1;
     const rows = maxRow + 1;
     if (cols * rows !== count) return null;
@@ -76,71 +91,65 @@
 
   async function discoverBooks() {
     const storage = getStorage();
-    const result = [];
+    const bookPromises = [];
     for (let i = 1; i <= MAX_BOOKS; i++) {
-      const cover = `${BOOKS_PATH}${CATALOG_PREFIX}${i}${CATALOG_SUFFIX}`;
-      const hasCover = await fileExists(cover);
-      const folder = `${BOOKS_PATH}book${i}/`;
-      const pages = [];
-      const levelDirs = await getLevelDirs(folder);
-      const pieceExt = levelDirs.length > 0 ? await detectPieceExt(levelDirs[0]) : null;
-
-      if (pieceExt) {
-        for (const levelDir of levelDirs) {
-          const image = await detectLevelImage(levelDir);
-          if (!image) continue;
-          const grid = await detectGrid(levelDir, pieceExt);
-          if (!grid) continue;
-          const imgSize = await loadImageSize(image);
-          if (!imgSize) continue;
-          const isVertical = imgSize.height > imgSize.width;
-          const isSquare = imgSize.width === imgSize.height;
-          const maxW = isSquare ? 320 : (isVertical ? 280 : 320);
-          const maxH = isSquare ? 320 : (isVertical ? 360 : 320);
-          const scale = Math.min(maxW / imgSize.width, maxH / imgSize.height);
-          const wrapperW = Math.floor(imgSize.width * scale);
-          const wrapperH = Math.floor(imgSize.height * scale);
-          const tileW = Math.floor(wrapperW / grid.cols);
-          const tileH = Math.floor(wrapperH / grid.rows);
-          pages.push({
-            folder: levelDir,
-            image,
-            pieceExt,
-            cols: grid.cols,
-            rows: grid.rows,
-            tileW,
-            tileH,
-            wrapperW,
-            wrapperH,
-            completed: !!(storage.books[i] && storage.books[i].pages && storage.books[i].pages[pages.length + 1])
-          });
+      bookPromises.push((async (idx) => {
+        const cover = `${BOOKS_PATH}${CATALOG_PREFIX}${idx}${CATALOG_SUFFIX}`;
+        const hasCover = await fileExists(cover);
+        const folder = `${BOOKS_PATH}book${idx}/`;
+        const pages = [];
+        const levelDirs = await getLevelDirs(folder);
+        const pieceExt = levelDirs.length > 0 ? await detectPieceExt(levelDirs[0]) : null;
+        if (pieceExt) {
+          for (const levelDir of levelDirs) {
+            const image = await detectLevelImage(levelDir);
+            if (!image) continue;
+            const grid = await detectGrid(levelDir, pieceExt);
+            if (!grid) continue;
+            const imgSize = await loadImageSize(image);
+            if (!imgSize) continue;
+            const isVertical = imgSize.height > imgSize.width;
+            const isSquare = imgSize.width === imgSize.height;
+            const maxW = isSquare ? 320 : (isVertical ? 280 : 320);
+            const maxH = isSquare ? 320 : (isVertical ? 360 : 320);
+            const scale = Math.min(maxW / imgSize.width, maxH / imgSize.height);
+            const wrapperW = Math.floor(imgSize.width * scale);
+            const wrapperH = Math.floor(imgSize.height * scale);
+            const tileW = Math.floor(wrapperW / grid.cols);
+            const tileH = Math.floor(wrapperH / grid.rows);
+            pages.push({
+              folder: levelDir,
+              image,
+              pieceExt,
+              cols: grid.cols,
+              rows: grid.rows,
+              tileW,
+              tileH,
+              wrapperW,
+              wrapperH,
+              completed: !!(storage.books[idx] && storage.books[idx].pages && storage.books[idx].pages[pages.length + 1])
+            });
+          }
         }
-      }
-
-      result.push({
-        index: i,
-        cover,
-        hasCover,
-        folder,
-        pages,
-        completed: pages.length > 0 && pages.every(p => p.completed),
-        pageCount: pages.length
-      });
+        return { index: idx, cover, hasCover, folder, pages, pageCount: pages.length };
+      })(i));
     }
-    return result;
+    const books = await Promise.all(bookPromises);
+    return books.map(book => ({
+      ...book,
+      completed: book.pages.length > 0 && book.pages.every(p => p.completed)
+    }));
   }
 
   async function getLevelDirs(bookFolder) {
-    const dirs = [];
+    const checks = [];
     for (let n = 1; n <= 50; n++) {
       const dir = `${bookFolder}level${n}/`;
-      if (await fileExists(dir + '0_0.jpg')) {
-        dirs.push(dir);
-      } else if (await fileExists(dir + '0_0.png')) {
-        dirs.push(dir);
-      }
+      checks.push(fileExists(dir + '0_0.jpg').then(() => dir));
+      checks.push(fileExists(dir + '0_0.png').then(() => dir));
     }
-    return dirs;
+    const results = await Promise.all(checks);
+    return results.filter(Boolean);
   }
 
   async function detectLevelImage(folder) {
@@ -152,8 +161,9 @@
       `${folder}level.jpg`,
       `${folder}level.png`
     ];
-    for (const src of candidates) {
-      if (await fileExists(src)) return src;
+    const results = await Promise.all(candidates.map(src => fileExists(src).then(exists => ({exists, src}))));
+    for (const {exists, src} of results) {
+      if (exists) return src;
     }
     return null;
   }
