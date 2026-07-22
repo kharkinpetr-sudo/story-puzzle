@@ -1,0 +1,34 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Story Puzzle</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="catalog-screen" class="screen hidden">
+      <div id="catalog-scroll">
+        <div id="catalog-grid"></div>
+      </div>
+    </div>
+
+    <div id="book-screen" class="screen hidden">
+      <div id="game-wrapper">
+        <div id="grid">
+          <div id="tiles-layer"></div>
+        </div>
+        <img id="full-image" class="hidden" alt="Готовый пазл" />
+      </div>
+      <textarea id="episode-input" class="episode-input" placeholder="Введите текст эпизода..." readonly></textarea>
+      <div id="menu">
+        <button class="menu-btn" data-action="catalog">В каталог</button>
+        <button class="menu-btn" data-action="restart">Заново</button>
+        <button id="btn-continue" class="menu-btn" disabled>ПРОДОЛЖИТЬ</button>
+      </div>
+    </div>
+  </div>
+  <script src="js/game.js"></script>
+</body>
+</html>
